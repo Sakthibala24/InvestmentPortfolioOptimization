@@ -65,7 +65,7 @@ This project applies machine learning algorithms to optimize asset allocation ac
 
 ### ⚙️ Tools
 - Jupyter Notebook
-- VS Code / PyCharm
+- VS Code 
 - Git & GitHub
 - Excel (for data storage and export)
 
