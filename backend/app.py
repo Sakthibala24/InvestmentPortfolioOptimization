@@ -5,13 +5,13 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
-import yfinance as yf
 import requests
 from datetime import datetime, timedelta
 import os
 from dotenv import load_dotenv
 import logging
 import json
+from services.csv_data_service import CSVDataService
 
 # Load environment variables
 load_dotenv()
@@ -29,6 +29,9 @@ db = SQLAlchemy(app)
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize CSV data service
+csv_data_service = CSVDataService()
 
 # Database Models
 class Portfolio(db.Model):
@@ -72,7 +75,7 @@ class PortfolioOptimizer:
     def get_market_data(self, tickers, period='1y'):
         """Fetch market data for given tickers"""
         try:
-            data = {}
+            # Use CSV data service instead of yfinance
             for ticker in tickers:
                 # Handle Indian stock tickers
                 if not ticker.endswith('.NS') and ticker not in ['CASH', 'GOLDETF']:
@@ -80,18 +83,12 @@ class PortfolioOptimizer:
                 else:
                     ticker_symbol = ticker
                 
-                try:
-                    stock = yf.Ticker(ticker_symbol)
-                    hist = stock.history(period=period)
-                    if not hist.empty:
-                        data[ticker] = hist['Close'].values
-                    else:
-                        # Fallback to mock data if ticker not found
-                        data[ticker] = self._generate_mock_data()
-                except:
+                stock_data = csv_data_service.get_stock_data(ticker_symbol, period)
+                if stock_data and stock_data.get('historical_data'):
+                    prices = [float(d['close']) for d in stock_data['historical_data']]
+                    data[ticker] = np.array(prices)
+                else:
                     data[ticker] = self._generate_mock_data()
-            
-            return data
         except Exception as e:
             logger.error(f"Error fetching market data: {e}")
             return {ticker: self._generate_mock_data() for ticker in tickers}
@@ -393,34 +390,20 @@ def get_market_data(ticker):
     try:
         period = request.args.get('period', '1y')
         
-        # Handle Indian stock tickers
-        if not ticker.endswith('.NS') and ticker not in ['CASH', 'GOLDETF']:
-            ticker_symbol = f"{ticker}.NS"
-        else:
-            ticker_symbol = ticker
+        # Use CSV data service
+        stock_data = csv_data_service.get_stock_data(ticker, period)
         
-        stock = yf.Ticker(ticker_symbol)
-        hist = stock.history(period=period)
-        
-        if hist.empty:
+        if not stock_data:
             return jsonify({'success': False, 'error': 'No data found for ticker'})
-        
-        # Get current price and basic info
-        info = stock.info
-        current_price = hist['Close'].iloc[-1]
-        
-        # Calculate basic metrics
-        returns = hist['Close'].pct_change().dropna()
-        volatility = returns.std() * np.sqrt(252)  # Annualized
-        
+            
         return jsonify({
             'success': True,
             'ticker': ticker,
-            'current_price': float(current_price),
-            'volatility': float(volatility),
-            'market_cap': info.get('marketCap'),
-            'sector': info.get('sector'),
-            'price_history': hist['Close'].tail(30).to_dict()  # Last 30 days
+            'current_price': stock_data['current_price'],
+            'volatility': stock_data['volatility'],
+            'annual_return': stock_data['annual_return'],
+            'sharpe_ratio': stock_data['sharpe_ratio'],
+            'price_history': {d['date']: d['close'] for d in stock_data['historical_data']}
         })
         
     except Exception as e:
@@ -442,7 +425,7 @@ def calculate_risk_profile():
         weights = np.array(amounts) / sum(amounts)
         
         # Get market data and calculate metrics
-        price_data = optimizer.get_market_data(tickers)
+        price_data = csv_data_service.get_returns_data(tickers)
         returns_data = optimizer.calculate_returns(price_data)
         
         # Calculate portfolio metrics
@@ -480,52 +463,18 @@ def calculate_risk_profile():
 def get_benchmark_data():
     """Get benchmark comparison data"""
     try:
-        benchmarks = {
-            'NIFTY 50': '^NSEI',
-            'SENSEX': '^BSESN',
-            'Gold ETF': 'GOLDBEES.NS',
-            'Bank Nifty': '^NSEBANK',
-            'IT Index': '^CNXIT'
-        }
+        # Use sector performance from CSV data
+        sector_data = csv_data_service.get_sector_performance()
         
         benchmark_data = []
-        
-        for name, symbol in benchmarks.items():
-            try:
-                stock = yf.Ticker(symbol)
-                hist = stock.history(period='1y')
-                
-                if not hist.empty:
-                    returns = hist['Close'].pct_change().dropna()
-                    annual_return = (hist['Close'].iloc[-1] / hist['Close'].iloc[0] - 1) * 100
-                    volatility = returns.std() * np.sqrt(252) * 100
-                    max_drawdown = optimizer._calculate_max_drawdown(returns.values) * 100
-                    sharpe_ratio = annual_return / volatility if volatility > 0 else 0
-                    
-                    benchmark_data.append({
-                        'name': name,
-                        'annual_return': round(annual_return, 2),
-                        'volatility': round(volatility, 2),
-                        'sharpe_ratio': round(sharpe_ratio, 2),
-                        'max_drawdown': round(max_drawdown, 2)
-                    })
-                else:
-                    # Fallback data
-                    benchmark_data.append({
-                        'name': name,
-                        'annual_return': np.random.uniform(8, 15),
-                        'volatility': np.random.uniform(12, 20),
-                        'sharpe_ratio': np.random.uniform(0.8, 1.2),
-                        'max_drawdown': np.random.uniform(-15, -25)
-                    })
-            except:
-                # Fallback data for failed requests
+        for name, data in sector_data.items():
+            if data:
                 benchmark_data.append({
                     'name': name,
-                    'annual_return': np.random.uniform(8, 15),
-                    'volatility': np.random.uniform(12, 20),
-                    'sharpe_ratio': np.random.uniform(0.8, 1.2),
-                    'max_drawdown': np.random.uniform(-15, -25)
+                    'annual_return': round(data['annual_return'], 2),
+                    'volatility': round(data['volatility'], 2),
+                    'sharpe_ratio': round(data['sharpe_ratio'], 2),
+                    'max_drawdown': round(data['max_drawdown'], 2)
                 })
         
         return jsonify({
