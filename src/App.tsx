@@ -2,8 +2,10 @@ import React, { useState } from "react";
 import { Bar, Pie } from "react-chartjs-2";
 import "chart.js/auto";
 import { TrendingUp, PieChart, BarChart3, Target, Wrench as Benchmark, Plus, Settings, Brain } from "lucide-react";
+import { ConnectionStatus } from "./components/ConnectionStatus";
+import { apiService, OptimizationRequest, PortfolioItem as ApiPortfolioItem } from "./services/api";
 
-interface PortfolioItem {
+interface PortfolioItem extends ApiPortfolioItem {
   ticker: string;
   amount: number;
   assetClass: string;
@@ -22,13 +24,49 @@ const App = () => {
   const [model, setModel] = useState("Random Forest");
   const [strategy, setStrategy] = useState("MPT");
   const [risk, setRisk] = useState(0.5);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [optimizationError, setOptimizationError] = useState<string | null>(null);
 
-  const runOptimization = () => {
-    const updated = portfolio.map((item) => ({
-      ...item,
-      optimizedAmount: item.amount * (1 + (0.15 - risk * 0.2))
-    }));
-    setOptimized(updated);
+  const runOptimization = async () => {
+    setIsOptimizing(true);
+    setOptimizationError(null);
+    
+    try {
+      const optimizationRequest: OptimizationRequest = {
+        holdings: portfolio.map(item => ({
+          ticker: item.ticker,
+          amount: item.amount,
+          assetClass: item.assetClass
+        })),
+        model,
+        strategy,
+        risk_level: risk
+      };
+
+      const result = await apiService.optimizePortfolio(optimizationRequest);
+      
+      if (result.success && result.optimized_holdings) {
+        const updated = result.optimized_holdings.map((item) => ({
+          ...item,
+          optimizedAmount: item.optimized_amount || item.amount
+        }));
+        setOptimized(updated);
+      } else {
+        throw new Error(result.error || 'Optimization failed');
+      }
+    } catch (error) {
+      console.error('Optimization error:', error);
+      setOptimizationError(error instanceof Error ? error.message : 'Optimization failed');
+      
+      // Fallback to mock optimization
+      const updated = portfolio.map((item) => ({
+        ...item,
+        optimizedAmount: item.amount * (1 + (0.15 - risk * 0.2))
+      }));
+      setOptimized(updated);
+    } finally {
+      setIsOptimizing(false);
+    }
   };
 
   const tabs = [
@@ -71,6 +109,9 @@ const App = () => {
           <p className="text-lg text-gray-600 dark:text-gray-400">
             Advanced portfolio optimization with AI-powered insights
           </p>
+          <div className="mt-4 flex justify-center">
+            <ConnectionStatus />
+          </div>
         </div>
 
         {renderTabs()}
@@ -217,11 +258,23 @@ const App = () => {
             
             <button
               onClick={runOptimization}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors duration-200 mb-6"
+              disabled={isOptimizing}
+              className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed text-white rounded-md font-medium transition-colors duration-200 mb-6"
             >
               <Target className="w-4 h-4" />
-              Optimize Portfolio
+              {isOptimizing ? 'Optimizing...' : 'Optimize Portfolio'}
             </button>
+
+            {optimizationError && (
+              <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p className="text-red-800 dark:text-red-200">
+                  <strong>Error:</strong> {optimizationError}
+                </p>
+                <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                  Showing fallback optimization results. Please check if the backend is running.
+                </p>
+              </div>
+            )}
 
             {optimized && (
               <div className="overflow-x-auto">
