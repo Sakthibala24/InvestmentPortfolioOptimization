@@ -1,0 +1,49 @@
+# ===== Flask and Extensions =====
+flask
+flask_cors
+flask-restful
+flask-sqlalchemy
+flask-marshmallow
+
+# ===== Environment & Config =====
+python-dotenv
+
+# ===== Data Science & ML =====
+numpy
+pandas
+scikit-learn
+scipy
+statsmodels
+xgboost
+joblib
+
+# ===== Financial & Market Data =====
+yfinance
+pandas-datareader
+requests
+
+# ===== Optimization & Math =====
+cvxpy
+pulp
+pyportfolioopt
+quantstats
+
+# ===== Serialization / Validation =====
+pydantic
+marshmallow
+
+# ===== Logging & Debugging =====
+loguru
+
+# ===== Deployment & Server =====
+gunicorn
+waitress  # for Windows deployment
+
+# ===== Security (optional) =====
+passlib
+
+# ===== Dev Tools (optional) =====
+ipython
+black
+pytest
+pre-commit
